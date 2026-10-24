@@ -1,7 +1,7 @@
 """Демо без Telegram: прогоняет конвейер на примерах и печатает результат.
 
     python -m app.cli demo            # все три рубрики на демо-данных
-    python -m app.cli demo --rubric slomanny_otklik
+    python -m app.cli demo --rubric molodets
     python -m app.cli purge           # удалить исходники старше срока хранения
 """
 
@@ -45,7 +45,7 @@ def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("demo")
-    d.add_argument("--rubric", choices=["slomanny_otklik", "hr_eyes", "threads_reply"])
+    d.add_argument("--rubric", choices=["molodets", "hr_eyes", "threads_reply"])
     sub.add_parser("purge")
     args = parser.parse_args()
     if args.cmd == "demo":

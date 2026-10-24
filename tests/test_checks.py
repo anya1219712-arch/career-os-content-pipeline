@@ -1,8 +1,8 @@
-from app.anonymize import anonymize_rules, find_leftovers
+from app.anonymize import anonymize, anonymize_rules, find_leftovers
 from app.facts import find_unverified_numbers
 from app.rules import check_text
 
-LINK = "https://t.me/osresume_bot?start=slomanny_otklik_tg"
+LINK = "https://t.me/osresume_bot?start=molodets_tg"
 
 
 def test_only_survey_numbers_allowed():
@@ -14,16 +14,16 @@ def test_only_survey_numbers_allowed():
 
 
 def test_rules_catch_tov_violations():
-    assert "ToV: давление временем" in check_text(f"Рекрутер смотрит резюме 7 секунд. {LINK}", "slomanny_otklik")
-    assert "ToV: обещание оффера" in check_text(f"Гарантируем оффер за 7 дней {LINK}", "slomanny_otklik")
-    assert "ToV: одобрение компаний" in check_text(f"Мне это показала HR Яндекса {LINK}", "slomanny_otklik")
-    assert check_text(f"Спокойный честный разбор. {LINK}", "slomanny_otklik") == []
+    assert "ToV: давление временем" in check_text(f"Рекрутер смотрит резюме 7 секунд. {LINK}", "molodets")
+    assert "ToV: обещание оффера" in check_text(f"Гарантируем оффер за 7 дней {LINK}", "molodets")
+    assert "ToV: одобрение компаний" in check_text(f"Мне это показала HR Яндекса {LINK}", "molodets")
+    assert check_text(f"Спокойный честный разбор. {LINK}", "molodets") == []
 
 
 def test_rules_require_link_and_length():
-    assert any("нет ссылки" in p for p in check_text("Текст без ссылки", "slomanny_otklik"))
+    assert any("нет ссылки" in p for p in check_text("Текст без ссылки", "molodets"))
     long_text = "а " * 300 + LINK
-    assert any("длиннее" in p for p in check_text(long_text, "slomanny_otklik", "threads"))
+    assert any("длиннее" in p for p in check_text(long_text, "molodets", "threads"))
 
 
 def test_anonymize_removes_contacts_and_companies():
@@ -39,3 +39,14 @@ def test_anonymize_removes_contacts_and_companies():
 def test_anonymize_keeps_normal_text():
     text = "Вела соцсети компании, участвовала в проектах, писала контент-план."
     assert anonymize_rules(text) == (text, [])
+    assert anonymize(text)[0] == text
+
+
+def test_ner_catches_what_rules_miss():
+    # имя без фамилии, компания без ООО, город и проект правилами не ловятся
+    text = "Работала с Петром в Ромашке в Казани, вела проект Альфа"
+    assert anonymize_rules(text)[0] == text
+    clean, found = anonymize(text)
+    for leak in ["Петр", "Ромашк", "Казан", "Альфа"]:
+        assert leak not in clean
+    assert find_leftovers(clean) == []

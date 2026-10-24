@@ -20,13 +20,13 @@ from .config import settings
 from .db import DB, iso_week
 from .pipeline import Pipeline
 
-log = logging.getLogger("slomanny_otklik")
+log = logging.getLogger("molodets")
 router = Router()
 db = DB(settings.db_path)
 pipeline = Pipeline(db)
 
 CONSENT_TEXT = (
-    "Можно анонимно разобрать твоё резюме в рубрике «Сломанный отклик»?\n\n"
+    "Можно анонимно разобрать твоё резюме в рубрике «Молодец, надо переписать»?\n\n"
     "Как это работает:\n"
     "• мы уберём имя, компании, контакты и всё, по чему тебя можно узнать;\n"
     "• перед публикацией пришлём текст тебе — без твоего «да» он не выйдет;\n"
@@ -66,7 +66,7 @@ async def start(message: Message, command: CommandObject, state: FSMContext):
     db.log(None, "start", tag)
     await message.answer(
         "Привет! Это Career OS: показываем резюме глазами рекрутера.\n\n"
-        "Хочешь поучаствовать в рубрике «Сломанный отклик»? Набери /razbor.")
+        "Хочешь поучаствовать в рубрике «Молодец, надо переписать»? Набери /razbor.")
 
 
 @router.message(Command("razbor"))
@@ -97,7 +97,7 @@ async def got_fragment(message: Message, state: FSMContext):
 async def got_story(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     await state.clear()
-    case_id = db.add_case("slomanny_otklik", data["fragment"], message.text, user_id=message.from_user.id,
+    case_id = db.add_case("molodets", data["fragment"], message.text, user_id=message.from_user.id,
                           source_tag=data.get("source_tag", ""), consent=data.get("consent", False))
     await message.answer("Принято! Готовим черновик, это займёт пару минут.")
     try:

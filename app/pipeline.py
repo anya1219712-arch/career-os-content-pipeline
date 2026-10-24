@@ -29,7 +29,7 @@ class Rubric:
 
 
 RUBRICS = {
-    "slomanny_otklik": Rubric("slomanny_otklik", "draft_slomanny_otklik", ("tg", "threads", "vk"), "slomanny_otklik",
+    "molodets": Rubric("molodets", "draft_molodets", ("tg", "threads", "vk"), "molodets",
                             weekly_limit=settings.special_per_week, needs_consent=True, uses_filter=True),
     "hr_eyes": Rubric("hr_eyes", "draft_hr_eyes", ("tg", "threads", "vk"), "hr_eyes", weekly_limit=4),
     # Г3: до двух ответов в будни; ответы не считаются постами канала
@@ -57,7 +57,7 @@ def compose(rubric: Rubric, draft: dict) -> str:
     """Собираем пост из полей модели. Цифру опроса подставляет программа из белого списка."""
     fact = fact_by_key(draft.get("fact_key", ""))
     fact_line = f"{fact.text} — по нашему опросу практиков найма." if fact else ""
-    if rubric.key == "slomanny_otklik":
+    if rubric.key == "molodets":
         body = (f"{draft['hook']}\n\n"
                 f"🛠 Что сделал: {draft['did']}\n"
                 f"📝 Что написал: «{draft['wrote']}»\n"
@@ -94,16 +94,14 @@ class Pipeline:
         if rubric.needs_consent and not case["consent_at"]:
             return self._stop(case_id, "stopped_no_consent", "нет согласия на разбор")
 
-        # 2. Обезличивание: сначала правила, потом модель, потом контрольная проверка
-        resume, found1 = anonymize.anonymize_rules(case["raw_input"] or "")
-        story, found2 = anonymize.anonymize_rules(case["real_story"] or "")
-        if rubric.key != "hr_eyes":
-            resume = self._ask(case_id, "anonymize", settings.model_cheap, "anonymize", {"text": resume})["text"]
-            if story:
-                story = self._ask(case_id, "anonymize", settings.model_cheap, "anonymize", {"text": story})["text"]
-        leftovers = anonymize.find_leftovers(resume + "\n" + story)
+        # 2. Обезличивание на нашем сервере, без ИИ: правила + локальная Natasha.
+        #    Модель видит только результат этого шага; если контроль нашёл следы — стоп до модели.
+        resume, _ = anonymize.anonymize(case["raw_input"] or "")
+        story, _ = anonymize.anonymize(case["real_story"] or "")
+        leftovers = sorted(set(anonymize.find_leftovers(resume) + anonymize.find_leftovers(story)))
         if leftovers:
             return self._stop(case_id, "stopped_pii", "после обезличивания остались: " + ", ".join(leftovers))
+        self.db.log(case_id, "anonymized_locally")
         self.db.update_case(case_id, anonymized=json.dumps({"resume": resume, "story": story}, ensure_ascii=False),
                             status="anonymized")
 
@@ -134,7 +132,7 @@ class Pipeline:
         draft_id = self.db.add_draft(case_id, texts, problems, status, settings.model_draft,
                                      settings.model_review, draft.get("fact_key", ""))
         card_path = None
-        if "tg" in texts and rubric.key == "slomanny_otklik":
+        if "tg" in texts and rubric.key == "molodets":
             card_path = str(render_card(draft_id, draft, fact_by_key(draft.get("fact_key", ""))))
             self.db.update_draft(draft_id, card_path=card_path)
         self.db.update_case(case_id, status="drafted")

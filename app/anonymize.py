@@ -1,10 +1,14 @@
-"""Обезличивание, слой 1: правила. Работает до модели, поэтому в модель не уходят контакты.
+"""Обезличивание на нашем сервере, без ИИ. В модель уходит только уже обезличенный текст.
 
-Слой 2 (модель) убирает то, что правилами не поймать: имена, редкие должности, детали проектов.
-После обоих слоёв `find_leftovers` ещё раз ищет следы — если нашлись, кейс останавливается.
+Слой 1 — правила: телефоны, почта, ссылки, ники, юрлица, известные компании, ФИО.
+Слой 2 — Natasha: локальное распознавание имён, организаций и мест в русском тексте
+(модели входят в пакет и работают без интернета, данные никуда не отправляются).
+Контроль — `find_leftovers` прогоняет оба слоя ещё раз; если что-то нашлось, кейс
+останавливается и до модели не доходит.
 """
 
 import re
+from functools import lru_cache
 
 PHONE = re.compile(r"(?:\+7|8)[\s\-()]*\d{3}[\s\-()]*\d{3}[\s\-]*\d{2}[\s\-]*\d{2}")
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
@@ -34,9 +38,14 @@ RULES = [
     ("ФИО", FULL_NAME, "[имя]"),
 ]
 
+NER_LABELS = {"PER": ("имя", "[имя]"), "ORG": ("организация", "[компания]"), "LOC": ("место", "[город]")}
+# Площадки и сервисы, которые не указывают на человека: их не маскируем
+NOT_IDENTIFYING = {"vk", "вк", "вконтакте", "telegram", "телеграм", "телеграме", "hh", "hh.ru", "headhunter",
+                   "instagram", "инстаграм", "threads", "youtube", "ютуб", "дзен", "google", "excel", "figma"}
+
 
 def anonymize_rules(text: str) -> tuple[str, list[str]]:
-    """Заменяет персональные данные на метки. Возвращает текст и список найденных типов."""
+    """Слой 1: заменяет найденное правилами на метки. Возвращает текст и типы находок."""
     found: list[str] = []
     for label, pattern, replacement in RULES:
         text, n = pattern.subn(replacement, text)
@@ -45,6 +54,40 @@ def anonymize_rules(text: str) -> tuple[str, list[str]]:
     return text, found
 
 
+@lru_cache(maxsize=1)
+def _natasha():
+    from natasha import Doc, NewsEmbedding, NewsNERTagger, Segmenter
+    return Doc, Segmenter(), NewsNERTagger(NewsEmbedding())
+
+
+def _ner_spans(text: str):
+    Doc, segmenter, tagger = _natasha()
+    doc = Doc(text)
+    doc.segment(segmenter)
+    doc.tag_ner(tagger)
+    # метки вида [имя] модель NER иногда помечает сама — их пропускаем
+    return [s for s in doc.spans if s.type in NER_LABELS and not s.text.startswith("[")
+            and s.text.strip(" .,").lower() not in NOT_IDENTIFYING]
+
+
+def anonymize_ner(text: str) -> tuple[str, list[str]]:
+    """Слой 2: имена, организации и места через локальную модель Natasha."""
+    spans = _ner_spans(text)
+    found = sorted({NER_LABELS[s.type][0] for s in spans})
+    for s in sorted(spans, key=lambda s: s.start, reverse=True):
+        text = text[:s.start] + NER_LABELS[s.type][1] + text[s.stop:]
+    return text, found
+
+
+def anonymize(text: str) -> tuple[str, list[str]]:
+    """Оба слоя подряд. Вызывается до любого обращения к модели."""
+    text, found_rules = anonymize_rules(text)
+    text, found_ner = anonymize_ner(text)
+    return text, found_rules + found_ner
+
+
 def find_leftovers(text: str) -> list[str]:
-    """Финальная проверка: остались ли следы персональных данных после двух слоёв."""
-    return [label for label, pattern, _ in RULES if pattern.search(text)]
+    """Контроль после маскировки: правила и NER ещё раз. Непустой список = стоп."""
+    left = [label for label, pattern, _ in RULES if pattern.search(text)]
+    left += sorted({NER_LABELS[s.type][0] for s in _ner_spans(text)})
+    return left

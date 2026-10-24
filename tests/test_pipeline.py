@@ -16,19 +16,43 @@ def pipe(tmp_path, monkeypatch):
     return Pipeline(DB(":memory:"), MockLLM())
 
 
+class RecordingLLM(MockLLM):
+    """Запоминает всё, что ушло в модель."""
+    def __init__(self):
+        self.sent = []
+
+    def ask(self, task, model, system, user):
+        self.sent.append(user)
+        return super().ask(task, model, system, user)
+
+
+def test_model_never_sees_personal_data(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.config.settings.output_dir", tmp_path)
+    llm = RecordingLLM()
+    p = Pipeline(DB(":memory:"), llm)
+    resume = ("Анна Смирнова, ООО «Ромашка», Казань. SMM-менеджер, вела проект Альфа вместе с Петром. "
+              "anna@mail.ru, +7 900 123-45-67, t.me/anna_cv")
+    res = p.run(p.db.add_case("molodets", resume, STORY, user_id=1, consent=True))
+    assert llm.sent, "конвейер должен был обратиться к модели"
+    everything_sent = "\n".join(llm.sent)
+    for leak in ["Анна", "Смирнов", "Ромашк", "Казан", "Альфа", "Петр", "anna@mail.ru", "900", "anna_cv"]:
+        assert leak not in everything_sent, f"в модель ушло: {leak}"
+    assert res.status == "waiting_author"
+
+
 def test_no_consent_stops(pipe):
-    cid = pipe.db.add_case("slomanny_otklik", RESUME, STORY, user_id=1, consent=False)
+    cid = pipe.db.add_case("molodets", RESUME, STORY, user_id=1, consent=False)
     assert pipe.run(cid).status == "stopped_no_consent"
     assert pipe.db.drafts_by_status("waiting_author") == []
 
 
 def test_full_flow_goes_through_author_and_editor(pipe):
-    cid = pipe.db.add_case("slomanny_otklik", RESUME, STORY, user_id=1, consent=True)
+    cid = pipe.db.add_case("molodets", RESUME, STORY, user_id=1, consent=True)
     res = pipe.run(cid)
     assert res.status == "waiting_author"
     assert set(res.texts) == {"tg", "threads", "vk"}
     for platform, text in res.texts.items():
-        assert f"start=slomanny_otklik_{platform}" in text
+        assert f"start=molodets_{platform}" in text
         assert "anna@mail.ru" not in text
     assert "10 из 10" in res.texts["tg"]          # цифра подставлена из белого списка
     with pytest.raises(ValueError):                # без автора редактор утвердить не может
@@ -41,7 +65,7 @@ def test_full_flow_goes_through_author_and_editor(pipe):
 def test_weekly_limit_moves_second_issue_to_next_week(pipe):
     weeks = []
     for _ in range(2):
-        cid = pipe.db.add_case("slomanny_otklik", RESUME, STORY, user_id=1, consent=True)
+        cid = pipe.db.add_case("molodets", RESUME, STORY, user_id=1, consent=True)
         res = pipe.run(cid)
         pipe.author_decision(res.draft_id, True)
         weeks.append(pipe.approve(res.draft_id, editor_id=7))
@@ -60,7 +84,7 @@ class InventsNumbers(MockLLM):
     """Модель, которая упорно вписывает цифру не из опроса."""
     def ask(self, task, model, system, user):
         out = super().ask(task, model, system, user)
-        if task == "draft_slomanny_otklik":
+        if task == "draft_molodets":
             out["hook"] = "7 из 10 рекрутеров отсеют такое резюме"
         return out
 
@@ -77,7 +101,7 @@ class ReviewerFindsEmbellishment(MockLLM):
 def test_failed_checks_block_issue_after_one_redraft(tmp_path, monkeypatch, llm, expected):
     monkeypatch.setattr("app.config.settings.output_dir", tmp_path)
     p = Pipeline(DB(":memory:"), llm)
-    res = p.run(p.db.add_case("slomanny_otklik", RESUME, STORY, user_id=1, consent=True))
+    res = p.run(p.db.add_case("molodets", RESUME, STORY, user_id=1, consent=True))
     assert res.status == "checks_failed"
     assert any(expected in x for x in res.problems)
     redrafts = p.db.conn.execute("SELECT COUNT(*) FROM log WHERE step='redraft'").fetchone()[0]
@@ -94,7 +118,7 @@ def test_editor_edit_is_rechecked(pipe):
 
 
 def test_revoke_deletes_data(pipe):
-    cid = pipe.db.add_case("slomanny_otklik", RESUME, STORY, user_id=42, consent=True)
+    cid = pipe.db.add_case("molodets", RESUME, STORY, user_id=42, consent=True)
     res = pipe.run(cid)
     assert pipe.db.revoke_user(42) == [cid]
     case = pipe.db.get_case(cid)
@@ -103,7 +127,7 @@ def test_revoke_deletes_data(pipe):
 
 
 def test_purge_removes_old_sources(pipe):
-    cid = pipe.db.add_case("slomanny_otklik", RESUME, STORY, user_id=1, consent=True)
+    cid = pipe.db.add_case("molodets", RESUME, STORY, user_id=1, consent=True)
     pipe.db.conn.execute("UPDATE cases SET created_at='2020-01-01T00:00:00+00:00' WHERE id=?", (cid,))
     assert pipe.db.purge_old(30) == 1
     assert pipe.db.get_case(cid)["raw_input"] is None

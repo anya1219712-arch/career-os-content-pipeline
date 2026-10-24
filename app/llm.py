@@ -52,17 +52,15 @@ class MockLLM:
 
     def ask(self, task: str, model: str, system: str, user: str) -> dict:
         data = json.loads(user)
-        if task == "anonymize":
-            return {"text": data["text"]}
         if task == "filter":
             ok = len(data.get("resume", "")) > 20 and len(data.get("story", "")) > 20
             return {"fits": ok, "reason": "есть разрыв между сделанным и написанным" if ok else "мало данных"}
-        if task == "draft_slomanny_otklik":
+        if task == "draft_molodets":
             # Как сделала бы модель: в «что написал» берём только строки опыта, без контактов
             parts = [p.strip() for p in data["resume"].split(".") if p.strip()]
             duties = [p for p in parts if "[" not in p and "контакт" not in p.lower()]
             return {
-                "hook": "Сломанный отклик: разбираем резюме, где сделано больше, чем написано.",
+                "hook": "Молодец, надо переписать: разбираем резюме, где сделано больше, чем написано.",
                 "did": data["story"].strip().rstrip(".") + ".",
                 "wrote": ". ".join(duties) + ".",
                 "recruiter_view": "Рекрутер видит обязанности и не видит результата, поэтому отклик выглядит как у всех.",
