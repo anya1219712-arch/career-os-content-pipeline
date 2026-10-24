@@ -2,6 +2,7 @@
 
     python -m app.cli demo            # все три рубрики на демо-данных
     python -m app.cli demo --rubric molodets
+    python -m app.cli reels           # из демо-героя 3 ролика (MP4, если есть Playwright и ffmpeg)
     python -m app.cli purge           # удалить исходники старше срока хранения
 """
 
@@ -41,15 +42,33 @@ def demo(rubric: str | None):
         print()
 
 
+def make_reels():
+    db = DB(settings.db_path)
+    pipe = Pipeline(db)
+    sample = next(s for s in SAMPLES if s["rubric"] == "molodets" and s.get("consent"))
+    res = pipe.run(db.add_case("molodets", sample["input"], sample["story"], source_tag="demo", consent=True))
+    pipe.author_decision(res.draft_id, True)
+    for rid in pipe.make_reels(res.draft_id):
+        r = db.get_reel(rid)
+        sb = json.loads(r["storyboard"])
+        print(f"Ролик #{rid} · угол {r['angle']} · {sb['seconds']} с · статус {r['status']}")
+        for s in sb["scenes"]:
+            print(f"  [{s['start']:>4} с] {s['caption']}")
+        print(f"  файл: {r['video_path']}\n")
+
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("demo")
     d.add_argument("--rubric", choices=["molodets", "hr_eyes", "threads_reply"])
+    sub.add_parser("reels")
     sub.add_parser("purge")
     args = parser.parse_args()
     if args.cmd == "demo":
         demo(args.rubric)
+    elif args.cmd == "reels":
+        make_reels()
     else:
         print("Удалено исходников:", DB(settings.db_path).purge_old(settings.retention_days))
 

@@ -58,5 +58,12 @@ class Settings:
     bot_username: str = os.getenv("BOT_USERNAME", "osresume_bot")
     timezone: str = os.getenv("TZ_NAME", "Europe/Moscow")
 
+    # Ролики: рендер на своём сервере, голос — Yandex SpeechKit (необязательно)
+    reels_per_hero: int = int(os.getenv("REELS_PER_HERO", "3"))     # из истории одного героя 2–3 ролика
+    reels_per_week: int = int(os.getenv("REELS_PER_WEEK", "7"))     # план слайда 8: 7 роликов в неделю
+    speechkit_api_key: str = os.getenv("SPEECHKIT_API_KEY", "")
+    speechkit_folder_id: str = os.getenv("SPEECHKIT_FOLDER_ID", "")
+    speechkit_voice: str = os.getenv("SPEECHKIT_VOICE", "alena")
+
 
 settings = Settings()

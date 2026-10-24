@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: {{ w }}px; height: {{ h }}px; overflow: hidden; background: #1A3DFB;
+               font-family: Roboto, Arial, sans-serif; }
+  .top { position: absolute; top: 44px; left: 44px; right: 44px; display: flex; justify-content: space-between;
+         color: #fff; font-size: 26px; font-weight: 700; }
+  .top span { color: #FA7614; }
+  .rubric { color: #DDE3FF; font-weight: 400; font-size: 22px; }
+  .bar { position: absolute; top: 100px; left: 44px; right: 44px; height: 6px; background: rgba(255,255,255,.25);
+         border-radius: 3px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: #FA7614;
+           animation: grow {{ total }}s linear forwards; }
+  .scene { position: absolute; inset: 160px 44px 160px 44px; display: flex; flex-direction: column;
+           justify-content: center; gap: 28px; opacity: 0; transform: translateY(40px); }
+  .label { font-size: 24px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: #DDE3FF; }
+  .caption { font-size: 54px; line-height: 1.15; font-weight: 700; color: #fff; }
+  .card { background: #FAFBFF; border-radius: 28px; padding: 36px; }
+  .card .caption { color: #1A2B5E; font-size: 46px; }
+  .wrote .card .caption { color: #6B74A0; font-weight: 400; font-style: italic; }
+  .fix .label, .outro .label { color: #FA7614; }
+  .outro .caption { font-size: 64px; }
+  .cta { position: absolute; bottom: 56px; left: 44px; right: 44px; color: #fff; font-size: 28px; }
+  .cta b { color: #FA7614; }
+  @keyframes grow { to { width: 100%; } }
+  @keyframes show { 0% {opacity:0; transform:translateY(40px)} 12% {opacity:1; transform:none}
+                    88% {opacity:1; transform:none} 100% {opacity:0; transform:translateY(-30px)} }
+  @keyframes stay { 0% {opacity:0; transform:translateY(40px)} 20% {opacity:1; transform:none} 100% {opacity:1; transform:none} }
+</style>
+</head>
+<body>
+  <div class="top"><div>O<span>S</span> · Career OS</div><div class="rubric">{{ rubric }}</div></div>
+  <div class="bar"><i></i></div>
+  {% for s in scenes %}
+  <div class="scene {{ s.kind }}"
+       style="animation: {{ 'stay' if loop.last else 'show' }} {{ s.seconds }}s ease {{ s.start }}s forwards">
+    <div class="label">{{ s.label }}</div>
+    {% if s.kind in ('wrote', 'fix', 'recruiter', 'fact') %}
+    <div class="card"><div class="caption">{{ s.caption }}</div></div>
+    {% else %}
+    <div class="caption">{{ s.caption }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+  <div class="cta">Проверь своё резюме: <b>@{{ bot }}</b></div>
+</body>
+</html>

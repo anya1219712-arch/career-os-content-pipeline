@@ -87,6 +87,28 @@ class MockLLM:
             fix = lines[0].replace("✏️ Как исправить: ", "") if lines else ""
             threads = "\n\n".join(p for p in [paragraphs[0], fix, paragraphs[-1]] if p)
             return {"threads": threads[:450], "vk": data["tg"]}
+        if task == "storyboard":
+            d, angle = data["draft"], data["angle"]
+            if angle == "tip":
+                scenes = [{"kind": "hook", "caption": d.get("title", "")[:70], "voice": d.get("title", "")},
+                          {"kind": "tip", "caption": "Верхние строки опыта — под требования вакансии",
+                           "voice": "Подгони первые строки опыта под требования вакансии."}]
+            else:
+                wrote = ", ".join(d.get("wrote", "").split(".")[0].split(", ")[:2])
+                did = d.get("did", "").split(",")[0][:65]
+                first = {"expectation": {"kind": "did", "caption": did, "voice": "Вот что человек сделал на работе."},
+                         "recruiter": {"kind": "wrote", "caption": f"«{wrote}»", "voice": "А вот что он написал в резюме."},
+                         "fix": {"kind": "wrote", "caption": f"Было: «{wrote}»", "voice": "Было так."}}[angle]
+                second = {"expectation": {"kind": "wrote", "caption": f"«{wrote}»", "voice": "А в резюме — одна сухая строка."},
+                          "recruiter": {"kind": "recruiter", "caption": "Видны обязанности, результата нет",
+                                        "voice": "Рекрутер видит обязанности и не видит результата."},
+                          "fix": {"kind": "fix", "caption": "Стало: что изменилось после тебя",
+                                  "voice": "Перепиши строку через результат: что изменилось после тебя."}}[angle]
+                scenes = [{"kind": "hook", "caption": "Опыт есть, его просто не видно",
+                           "voice": "Опыт есть, его просто не видно."}, first, second]
+            scenes.append({"kind": "outro", "caption": "Молодец, надо переписать",
+                           "voice": "Проверь своё резюме в боте Career OS."})
+            return {"scenes": scenes, "fact_key": "result_in_numbers"}
         if task == "review":
             return {"ok": True, "issues": []}
         raise ValueError(f"Неизвестный шаг: {task}")

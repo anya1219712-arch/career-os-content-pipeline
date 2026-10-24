@@ -182,7 +182,8 @@ async def editor_decision(call: CallbackQuery, state: FSMContext):
     if action == "ok":
         try:
             week = pipeline.approve(draft_id, call.from_user.id)
-            await call.message.edit_text(f"Утверждено, выпуск в слоте недели {week}.")
+            await call.message.edit_text(f"Утверждено, выпуск в слоте недели {week}. Собираю ролики…")
+            await make_and_route_reels(call.bot, draft_id)
         except ValueError as e:
             await call.answer(str(e), show_alert=True)
     elif action == "no":
@@ -202,6 +203,79 @@ async def editor_text(message: Message, state: FSMContext, bot: Bot):
     if problems:
         await message.answer("Правка не прошла правила:\n" + "\n".join(f"• {p}" for p in problems))
     await send_to_editor(bot, data["draft_id"], failed=bool(problems))
+
+
+# ---------- ролики: 2–3 на героя, герой и редактор видят их до публикации ----------
+
+async def make_and_route_reels(bot: Bot, draft_id: int):
+    try:
+        reel_ids = await asyncio.to_thread(pipeline.make_reels, draft_id)
+    except Exception as e:
+        log.exception("reels failed")
+        await notify_editor(bot, f"⚠️ Ролики для черновика #{draft_id} не собрались ({e}).")
+        return
+    case = db.get_case(db.get_draft(draft_id)["case_id"])
+    for rid in reel_ids:
+        r = db.get_reel(rid)
+        if r["status"] == "waiting_author" and case["user_id"]:
+            await send_reel(bot, case["user_id"], rid, "Из твоей истории сделали ролик. Всё верно и тебя не узнать?",
+                            (("Всё верно", f"rla:yes:{rid}"), ("Не публиковать", f"rla:no:{rid}")))
+        else:
+            await send_reel_to_editor(bot, rid)
+
+
+async def send_reel(bot: Bot, chat_id: int, reel_id: int, caption: str, buttons):
+    r = db.get_reel(reel_id)
+    path = r["video_path"]
+    if path and path.endswith(".mp4"):
+        await bot.send_video(chat_id, FSInputFile(path), caption=caption, reply_markup=kb(*buttons))
+    else:
+        scenes = json.loads(r["storyboard"]).get("scenes", [])
+        text = caption + "\n\n" + "\n".join(f"• {s['caption']}" for s in scenes)
+        await bot.send_message(chat_id, text[:4000], reply_markup=kb(*buttons))
+
+
+async def send_reel_to_editor(bot: Bot, reel_id: int):
+    if not settings.editor_chat_id:
+        return
+    r = db.get_reel(reel_id)
+    problems = json.loads(r["problems"] or "[]")
+    head = f"🎬 Ролик #{reel_id} · угол {r['angle']}"
+    if problems:
+        head += "\n\nНе прошёл проверку:\n" + "\n".join(f"• {p}" for p in problems)
+        buttons = (("Отклонить", f"rl:no:{reel_id}"),)
+    else:
+        buttons = (("Утвердить", f"rl:ok:{reel_id}"), ("Отклонить", f"rl:no:{reel_id}"))
+    await send_reel(bot, settings.editor_chat_id, reel_id, head[:1000], buttons)
+
+
+@router.callback_query(F.data.startswith("rla:"))
+async def reel_author(call: CallbackQuery, bot: Bot):
+    _, answer, rid = call.data.split(":")
+    status = pipeline.reel_author_decision(int(rid), answer == "yes")
+    await call.message.edit_reply_markup()
+    await call.message.answer("Спасибо! Передали редактору." if status == "waiting_editor" else "Поняли, не публикуем.")
+    if status == "waiting_editor":
+        await send_reel_to_editor(bot, int(rid))
+
+
+@router.callback_query(F.data.startswith("rl:"))
+async def reel_editor(call: CallbackQuery):
+    if not is_editor(call.from_user.id):
+        await call.answer("Только для редакторов", show_alert=True)
+        return
+    _, action, rid = call.data.split(":")
+    if action == "ok":
+        try:
+            week = pipeline.approve_reel(int(rid))
+            await call.message.edit_reply_markup()
+            await call.message.answer(f"Ролик #{rid} утверждён, неделя {week}.")
+        except ValueError as e:
+            await call.answer(str(e), show_alert=True)
+    else:
+        db.update_reel(int(rid), status="rejected")
+        await call.message.edit_reply_markup()
+        await call.message.answer(f"Ролик #{rid} отклонён.")
 
 
 @router.message(Command("queue"))

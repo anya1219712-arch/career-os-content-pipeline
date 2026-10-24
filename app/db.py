@@ -35,6 +35,17 @@ CREATE TABLE IF NOT EXISTS drafts (
     editor_id INTEGER,
     card_path TEXT
 );
+CREATE TABLE IF NOT EXISTS reels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    draft_id INTEGER NOT NULL REFERENCES drafts(id),
+    created_at TEXT NOT NULL,
+    angle TEXT NOT NULL,
+    storyboard TEXT NOT NULL,    -- JSON: сцены, тайминги, ключ факта
+    problems TEXT,
+    status TEXT NOT NULL,        -- checks_failed | waiting_author | waiting_editor | approved | rejected
+    video_path TEXT,
+    week TEXT
+);
 CREATE TABLE IF NOT EXISTS log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL,
@@ -62,6 +73,9 @@ class DB:
         self.conn = sqlite3.connect(str(path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(drafts)")}
+        if "draft_json" not in cols:          # поля модели нужны, чтобы собрать ролики из того же черновика
+            self.conn.execute("ALTER TABLE drafts ADD COLUMN draft_json TEXT")
 
     # --- журнал: каждый шаг конвейера оставляет след, по нему считаем время в пилоте ---
     def log(self, case_id: int | None, step: str, detail: str = "") -> None:
@@ -97,7 +111,9 @@ class DB:
             self.conn.execute(
                 "UPDATE cases SET raw_input=NULL, real_story=NULL, anonymized=NULL, status='revoked', revoked_at=? WHERE id=?",
                 (now(), cid))
-            self.conn.execute("UPDATE drafts SET status='rejected', texts='{}' WHERE case_id=?", (cid,))
+            self.conn.execute("UPDATE drafts SET status='rejected', texts='{}', draft_json='{}' WHERE case_id=?", (cid,))
+            self.conn.execute("UPDATE reels SET status='rejected', storyboard='{}' "
+                              "WHERE draft_id IN (SELECT id FROM drafts WHERE case_id=?)", (cid,))
             self.log(cid, "revoked")
         self.conn.commit()
         return ids
@@ -114,12 +130,13 @@ class DB:
 
     # --- черновики ---
     def add_draft(self, case_id: int, texts: dict, problems: list[str], status: str,
-                  model_draft: str = "", model_review: str = "", fact_key: str = "") -> int:
+                  model_draft: str = "", model_review: str = "", fact_key: str = "", draft_json: dict | None = None) -> int:
         cur = self.conn.execute(
-            "INSERT INTO drafts (case_id, created_at, model_draft, model_review, fact_key, texts, problems, status) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT INTO drafts (case_id, created_at, model_draft, model_review, fact_key, texts, problems, status, draft_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
             (case_id, now(), model_draft, model_review, fact_key,
-             json.dumps(texts, ensure_ascii=False), json.dumps(problems, ensure_ascii=False), status))
+             json.dumps(texts, ensure_ascii=False), json.dumps(problems, ensure_ascii=False), status,
+             json.dumps(draft_json or {}, ensure_ascii=False)))
         self.conn.commit()
         return cur.lastrowid
 
@@ -144,3 +161,28 @@ class DB:
 
     def drafts_by_status(self, status: str) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM drafts WHERE status=? ORDER BY id", (status,)).fetchall()
+
+    # --- ролики ---
+    def add_reel(self, draft_id: int, angle: str, storyboard: dict, problems: list[str], status: str,
+                 video_path: str | None) -> int:
+        cur = self.conn.execute(
+            "INSERT INTO reels (draft_id, created_at, angle, storyboard, problems, status, video_path) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (draft_id, now(), angle, json.dumps(storyboard, ensure_ascii=False),
+             json.dumps(problems, ensure_ascii=False), status, video_path))
+        self.conn.commit()
+        return cur.lastrowid
+
+    def get_reel(self, reel_id: int) -> sqlite3.Row | None:
+        return self.conn.execute("SELECT * FROM reels WHERE id=?", (reel_id,)).fetchone()
+
+    def reels_for_draft(self, draft_id: int) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM reels WHERE draft_id=? ORDER BY id", (draft_id,)).fetchall()
+
+    def update_reel(self, reel_id: int, **fields) -> None:
+        cols = ", ".join(f"{k}=?" for k in fields)
+        self.conn.execute(f"UPDATE reels SET {cols} WHERE id=?", (*fields.values(), reel_id))
+        self.conn.commit()
+
+    def reels_in_week(self, week: str) -> int:
+        return self.conn.execute("SELECT COUNT(*) FROM reels WHERE week=? AND status='approved'", (week,)).fetchone()[0]

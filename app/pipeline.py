@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
-from . import anonymize, rules
+from . import anonymize, reels, rules
 from .card import render_card
 from .config import settings
 from .db import DB, iso_week
@@ -130,7 +130,7 @@ class Pipeline:
 
         status = "checks_failed" if problems else ("waiting_author" if rubric.needs_consent else "waiting_editor")
         draft_id = self.db.add_draft(case_id, texts, problems, status, settings.model_draft,
-                                     settings.model_review, draft.get("fact_key", ""))
+                                     settings.model_review, draft.get("fact_key", ""), draft_json=draft)
         card_path = None
         if "tg" in texts and rubric.key == "molodets":
             card_path = str(render_card(draft_id, draft, fact_by_key(draft.get("fact_key", ""))))
@@ -195,6 +195,67 @@ class Pipeline:
             if rubric_ok and total_ok:
                 self.db.update_draft(draft_id, status="approved", week=week, editor_id=editor_id)
                 self.db.log(d["case_id"], "approved", week)
+                return week
+            day += timedelta(days=7)
+        raise RuntimeError("нет свободной недели в ближайшие 12")
+
+    # --- ролики: та же схема, другой формат ---
+    def make_reels(self, draft_id: int, render: bool = True) -> list[int]:
+        """Из проверенного черновика собираем 2–3 ролика. Источник — только обезличенные поля модели."""
+        d = self.db.get_draft(draft_id)
+        case = self.db.get_case(d["case_id"])
+        rubric = RUBRICS[case["rubric"]]
+        if d["status"] not in ("waiting_editor", "approved"):
+            raise ValueError(f"черновик в статусе {d['status']}: ролики делаем только после подтверждения автора")
+        draft = json.loads(d["draft_json"] or "{}")
+        angles = reels.ANGLES.get(rubric.key, ())[: settings.reels_per_hero]
+        source = json.loads(case["anonymized"] or "{}")
+        ids = []
+        for angle in angles:
+            payload = reels.payload(rubric.key, draft, angle)
+            sb, problems = None, []
+            for attempt in range(2):
+                raw = self._ask(case["id"], "storyboard", settings.model_draft, "storyboard", payload)
+                sb = reels.finalize(raw, angle)
+                problems = reels.check(sb)
+                if not problems:
+                    review = self._ask(case["id"], "review", settings.model_review, "review",
+                                       {"source": source, "draft": {"reel": sb.voice_text}})
+                    problems = [] if review.get("ok") else [f"проверка: {i}" for i in review.get("issues", [])]
+                if not problems or attempt == 1:
+                    break
+                payload = {**payload, "fix_these_problems": problems}
+                self.db.log(case["id"], "reel_redraft", "; ".join(problems))
+            video = None
+            if render and not problems:
+                settings.output_dir.mkdir(parents=True, exist_ok=True)
+                base = settings.output_dir / f"reel_{draft_id}_{angle}"
+                audio = reels.synthesize(sb.voice_text, base.with_suffix(".mp3"))
+                video = reels.render_video(sb, base.with_suffix(".mp4"), audio)
+                if video is None:            # нет ffmpeg/Playwright — отдаём редактору HTML-превью
+                    video = reels.render_html(sb, base.with_suffix(".html"))
+            status = "checks_failed" if problems else ("waiting_author" if rubric.needs_consent else "waiting_editor")
+            sb_dict = {"angle": sb.angle, "fact_key": sb.fact_key, "scenes": sb.scenes,
+                       "seconds": reels.total_seconds(sb)}
+            ids.append(self.db.add_reel(draft_id, angle, sb_dict, problems, status, str(video) if video else None))
+            self.db.log(case["id"], "reel", f"{angle}: {status}")
+        return ids
+
+    def reel_author_decision(self, reel_id: int, approved: bool) -> str:
+        status = "waiting_editor" if approved else "rejected"
+        self.db.update_reel(reel_id, status=status)
+        return status
+
+    def approve_reel(self, reel_id: int) -> str:
+        """Ролик встаёт в ближайшую неделю, где роликов меньше лимита (план: 7 в неделю)."""
+        r = self.db.get_reel(reel_id)
+        if r["status"] != "waiting_editor":
+            raise ValueError(f"ролик в статусе {r['status']}, утвердить нельзя")
+        day = datetime.now(timezone.utc)
+        for _ in range(12):
+            week = iso_week(day)
+            if self.db.reels_in_week(week) < settings.reels_per_week:
+                self.db.update_reel(reel_id, status="approved", week=week)
                 return week
             day += timedelta(days=7)
         raise RuntimeError("нет свободной недели в ближайшие 12")
