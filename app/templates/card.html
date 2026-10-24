@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { width: 1080px; height: 1350px; background: #1A3DFB; font-family: Roboto, Arial, sans-serif;
+         padding: 72px; display: flex; flex-direction: column; gap: 40px; color: #1A2B5E; }
+  .logo { color: #fff; font-size: 40px; font-weight: 700; letter-spacing: 1px; }
+  .logo span { color: #FA7614; }
+  .rubric { color: #DDE3FF; font-size: 32px; }
+  .hook { color: #fff; font-size: 56px; font-weight: 700; line-height: 1.15; }
+  .card { background: #FAFBFF; border-radius: 32px; padding: 48px; display: flex; flex-direction: column; gap: 20px; }
+  .label { font-size: 28px; font-weight: 700; color: #1A3DFB; text-transform: uppercase; letter-spacing: 1px; }
+  .label.fix { color: #FA7614; }
+  .text { font-size: 36px; line-height: 1.35; }
+  .was { color: #6B74A0; }
+  .fact { color: #fff; font-size: 30px; line-height: 1.35; margin-top: auto; }
+  .cta { color: #fff; font-size: 30px; }
+  .cta b { color: #FA7614; }
+</style>
+</head>
+<body>
+  <div class="logo">O<span>S</span> · Career OS</div>
+  <div class="rubric">Сломанный отклик</div>
+  <div class="hook">{{ hook }}</div>
+  <div class="card">
+    <div class="label">Было</div>
+    <div class="text was">«{{ wrote }}»</div>
+    <div class="label fix">Как исправить</div>
+    <div class="text">{{ fix }}</div>
+  </div>
+  <div class="fact">{{ fact }}</div>
+  <div class="cta">Проверь своё резюме: <b>@{{ bot }}</b></div>
+</body>
+</html>

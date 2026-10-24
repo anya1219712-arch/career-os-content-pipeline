@@ -1,0 +1,7 @@
+aiogram>=3.13,<4
+openai>=1.40
+APScheduler>=3.10,<4
+Jinja2>=3.1
+pytest>=8
+# необязательно: PNG-карточки (иначе карточка остаётся HTML)
+# playwright>=1.45
